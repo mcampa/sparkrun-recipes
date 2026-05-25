@@ -1,4 +1,4 @@
 registries:
   - name: mcampa
     description: mcampa's personal SparkRun recipe registry
-    recipes: .
+    recipes: recipes
