@@ -12,6 +12,7 @@ metadata:
   description: Optimized vLLM recipe for Qwen3.6-27B-FP8 with native MTP on DGX Spark
   model_params: 27B
   model_dtype: fp8
+  kv_dtype: fp8
 
 container: vllm-node-tf5
 build_args:
