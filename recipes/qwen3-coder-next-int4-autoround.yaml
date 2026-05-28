@@ -1,0 +1,53 @@
+# Recipe: Qwen3-Coder-Next int4-AutoRound (vLLM)
+# Fixed variant of @official/qwen3-coder-next-int4-autoround-vllm.
+# The official recipe's image (ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest)
+# is broken: `import vllm._C` fails with `libtorch_cuda.so: cannot open shared
+# object file`. This recipe uses the local `vllm-node-tf5` image instead.
+
+recipe_version: "1"
+
+name: qwen3-coder-next-int4-autoround
+runtime: vllm
+model: Intel/Qwen3-Coder-Next-int4-AutoRound
+
+metadata:
+  description: Qwen3-Coder-Next int4-AutoRound on single DGX Spark (fixed image)
+  model_dtype: int4
+  kv_dtype: fp8
+
+container: vllm-node-tf5
+build_args:
+  - --tf5
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.7
+
+  max_model_len: 262144
+  max_num_batched_tokens: 16384
+  max_num_seqs: 128
+
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+  VLLM_SLEEP_WHEN_IDLE: "0"
+
+command: |
+  vllm serve {model} \
+    --host {host} \
+    --port {port} \
+    -O3 \
+    --tensor-parallel-size {tensor_parallel} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --kv-cache-dtype fp8 \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --load-format fastsafetensors \
+    --trust-remote-code \
+    --tool-call-parser qwen3_coder \
+    --enable-auto-tool-choice
