@@ -1,8 +1,8 @@
 # Recipe: Qwen3.6-35B-A3B-PrismaQuant-4.75bit with DFlash speculation
 # Tuned for long-context throughput with FlashAttention and full-context
-# defaults. JSON-valued CLI args use escaped braces (`{{...}}`)
-# so templated placeholders (for example `{num_speculative_tokens}`) are
-# preserved correctly for runtime interpolation.
+# defaults. JSON-valued CLI args are written with single braces and any
+# nested numeric like num_speculative_tokens is hardcoded — sparkrun's
+# templater does not collapse `{{...}}` and does not template JSON-nested keys.
 
 recipe_version: '1'
 
@@ -60,6 +60,6 @@ command: |
     --tool-call-parser qwen3_coder \
     --optimization-level 3 \
     --performance-mode throughput \
-    --default-chat-template-kwargs '{{"preserve_thinking":true}}' \
-    --speculative-config '{{"method":"dflash","model":"z-lab/Qwen3.6-35B-A3B-DFlash","num_speculative_tokens":{num_speculative_tokens}}}' \
-    --override-generation-config '{{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}}'
+    --default-chat-template-kwargs '{"preserve_thinking":true}' \
+    --speculative-config '{"method":"dflash","model":"z-lab/Qwen3.6-35B-A3B-DFlash","num_speculative_tokens":6}' \
+    --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
