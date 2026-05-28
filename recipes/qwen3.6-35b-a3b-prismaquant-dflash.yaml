@@ -17,8 +17,7 @@ solo_only: false
 cluster_only: false
 
 mods:
-  - mods/fix-qwen3.5-autoround
-  - mods/fix-qwen3-coder-next
+  - "@mcampa/fix-qwen3.6-enhanced-chat-template"
 
 defaults:
   host: 0.0.0.0
@@ -42,6 +41,7 @@ command: |
     --host {host} \
     --port {port} \
     --served-model-name qwen3.6-35b \
+    --chat-template qwen3.6-enhanced.jinja \
     --language-model-only \
     --max-model-len {max_model_len} \
     --max-num-batched-tokens {max_num_batched_tokens} \
