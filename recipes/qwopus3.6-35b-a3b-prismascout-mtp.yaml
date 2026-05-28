@@ -1,0 +1,65 @@
+# Recipe: Qwopus3.6-35B-A3B-v1-PrismaSCOUT-Blackwell-NVFP4-BF16 with native MTP
+# cyburn's Qwopus3.6 reasoning fine-tune of Qwen3.6-35B-A3B, quantized to
+# 4.75 bpp via PrismaSCOUT (NVFP4 text body + BF16 vision/lm_head + MXFP8
+# hot path). Profile mirrors qwen3.6-35b-a3b-prismaquant-mtp; chat-template
+# fix mirrors qwen3.6-27b-prismascout-mtp. Vision encoder is dropped via
+# --language-model-only since calibration was text-only.
+
+recipe_version: '1'
+
+name: qwopus3.6-35b-a3b-prismascout-mtp
+model: cyburn/Qwopus3.6-35B-A3B-v1-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm-4.75bits
+
+description: cyburn/Qwopus3.6-35B-A3B-v1-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm-4.75bits with native MTP speculation, FP8 KV cache, FlashInfer attention, long-context Spark profile
+
+container: vllm-node-tf5
+
+solo_only: true
+cluster_only: false
+
+mods:
+  - mods/fix-qwen3.6-chat-template
+  - mods/fix-qwen3-coder-next
+
+defaults:
+  host: 0.0.0.0
+  port: 8000
+  max_model_len: 262144
+  max_num_batched_tokens: 32768
+  max_num_seqs: 4
+  gpu_memory_utilization: 0.6
+
+env:
+  FLASHINFER_DISABLE_VERSION_CHECK: '1'
+  HF_HUB_OFFLINE: '1'
+  TRANSFORMERS_OFFLINE: '1'
+  VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
+  VLLM_MARLIN_USE_ATOMIC_ADD: '1'
+  VLLM_TUNED_CONFIG_FOLDER: /workspace/moe-configs
+
+command: |
+  vllm serve cyburn/Qwopus3.6-35B-A3B-v1-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm-4.75bits \
+    --host {host} \
+    --port {port} \
+    --served-model-name qwopus3.6-35b \
+    --language-model-only \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --dtype auto \
+    --kv-cache-dtype fp8 \
+    --load-format instanttensor \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --quantization compressed-tensors \
+    --reasoning-parser qwen3 \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --optimization-level 3 \
+    --performance-mode throughput \
+    --default-chat-template-kwargs '{"preserve_thinking":true}' \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":3}' \
+    --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":1.1,"repetition_penalty":1.01}'
