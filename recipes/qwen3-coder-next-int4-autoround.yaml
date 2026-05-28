@@ -1,8 +1,13 @@
 # Recipe: Qwen3-Coder-Next int4-AutoRound (vLLM)
 # Fixed variant of @official/qwen3-coder-next-int4-autoround-vllm.
-# The official recipe's image (ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest)
-# is broken: `import vllm._C` fails with `libtorch_cuda.so: cannot open shared
-# object file`. This recipe uses the local `vllm-node-tf5` image instead.
+#
+# Two fixes vs. the official recipe:
+#   1. Image: official uses ghcr.io/spark-arena/dgx-vllm-eugr-nightly-tf5:latest
+#      which is broken — `import vllm._C` fails with missing libtorch_cuda.so.
+#      This recipe uses the local `vllm-node-tf5` image instead.
+#   2. Mod: AutoRound int4 weights load incorrectly in current vLLM (the model
+#      just echoes the input). The fix-qwen3-next-autoround mod reverts
+#      vllm-project/vllm#35156 inside the container to restore sane outputs.
 
 recipe_version: "1"
 
@@ -18,6 +23,9 @@ metadata:
 container: vllm-node-tf5
 build_args:
   - --tf5
+
+mods:
+  - mods/fix-qwen3-next-autoround
 
 defaults:
   port: 8000
