@@ -1,0 +1,64 @@
+# Recipe: Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16 with native MTP
+# Copied from spark-arena recipe 440ad5de with the JSON brace bug fixed.
+# Source double-braced JSON args ({{...}}) and templated {num_speculative_tokens}
+# inside JSON; sparkrun does not collapse double braces and does not substitute
+# vars inside JSON literals. Both are corrected here.
+
+recipe_version: '1'
+
+name: qwen3.6-27b-prismascout-mtp
+model: rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
+
+description: rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm + native MTP speculation
+
+container: vllm-node-tf5
+
+solo_only: false
+cluster_only: false
+
+mods:
+  - mods/fix-qwen3.6-chat-template
+
+defaults:
+  host: 0.0.0.0
+  port: 8355
+  gpu_memory_utilization: 0.8
+  max_num_seqs: 8
+  max_num_batched_tokens: 32768
+  max_model_len: 262144
+
+env:
+  NVIDIA_FORWARD_COMPAT: '1'
+  VLLM_MARLIN_USE_ATOMIC_ADD: '1'
+  FLASHINFER_DISABLE_VERSION_CHECK: '1'
+  TORCH_MATMUL_PRECISION: high
+  VLLM_TEST_FORCE_FP8_MARLIN: '1'
+  TRANSFORMERS_OFFLINE: '1'
+  VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
+  HF_HUB_OFFLINE: '1'
+
+command: |
+  vllm serve rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm \
+    --host {host} \
+    --port {port} \
+    --served-model-name qwen3.6 \
+    --language-model-only \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --dtype auto \
+    --kv-cache-dtype auto \
+    --load-format fastsafetensors \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --quantization compressed-tensors \
+    --reasoning-parser qwen3 \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --optimization-level 3 \
+    --performance-mode throughput \
+    --default-chat-template-kwargs '{"preserve_thinking":true}' \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":3}' \
+    --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
