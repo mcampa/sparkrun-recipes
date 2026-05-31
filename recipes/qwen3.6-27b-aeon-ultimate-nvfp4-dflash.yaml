@@ -25,13 +25,11 @@ defaults:
   served_model_name: aeon-qwen3.6-27b
 
 env:
-  VLLM_NVFP4_GEMM_BACKEND: flashinfer-cutlass
-  VLLM_USE_FLASHINFER_MOE_FP4: '0'
-  VLLM_USE_FLASHINFER_SAMPLER: '1'
   FLASHINFER_DISABLE_VERSION_CHECK: '1'
   VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
   TORCH_MATMUL_PRECISION: high
   NVIDIA_FORWARD_COMPAT: '1'
+  VLLM_MARLIN_USE_ATOMIC_ADD: '1'
 
 command: |
   vllm serve AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP-XS \
