@@ -11,7 +11,7 @@ model: nvidia/Qwen3.6-35B-A3B-NVFP4
 
 description: nvidia/Qwen3.6-35B-A3B-NVFP4 with native MTP speculation, FP8 KV cache, FlashInfer attention, long-context Spark profile
 
-container: vllm-node-tf5
+container: sparkrun-eugr-vllm-tf5
 
 solo_only: false
 cluster_only: false
