@@ -51,6 +51,8 @@ command: |
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
     --optimization-level 3 \
     --performance-mode throughput \
     --override-generation-config '{"temperature":0.7,"top_p":1.0,"top_k":-1,"repetition_penalty":1.0}'
