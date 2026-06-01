@@ -27,7 +27,7 @@ defaults:
   max_num_seqs: 2
   gpu_memory_utilization: 0.7
   served_model_name: gx10 qwen3.6-35b-a3b
-  chat_template: chat_template.jinja
+  chat_template: /workspace/vllm/chat_template.jinja
   tokenizer_mode: auto
 
 env:
