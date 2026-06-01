@@ -17,7 +17,7 @@ solo_only: false
 cluster_only: false
 
 mods:
-  - mods/fix-qwen3.6-chat-template
+  - "@mcampa/fix-qwen3.6-chat-template"
 
 defaults:
   host: 0.0.0.0
