@@ -1,0 +1,55 @@
+# Recipe: LiquidAI/LFM2.5-8B-A1B
+# Liquid AI's hybrid MoE: 8.3B total / 1.5B active. 24 layers
+# (18 double-gated LIV conv + 6 GQA), 128k context, native BF16.
+# Custom architecture — requires --trust-remote-code. Day-one vLLM support.
+# No reasoning parser; tool calls use a pythonic format with
+# <|tool_call_start|> / <|tool_call_end|> sentinels.
+
+recipe_version: '1'
+
+name: lfm2.5-8b-a1b
+model: LiquidAI/LFM2.5-8B-A1B
+
+description: LiquidAI/LFM2.5-8B-A1B hybrid MoE (8.3B/1.5B active) — BF16, 128k context, Spark-tuned
+
+container: sparkrun-eugr-vllm-tf5
+
+solo_only: false
+cluster_only: false
+
+defaults:
+  host: 0.0.0.0
+  port: 8000
+  max_model_len: 131072
+  max_num_batched_tokens: 32768
+  max_num_seqs: 16
+  gpu_memory_utilization: 0.85
+  served_model_name: lfm2.5-8b-a1b
+
+env:
+  TRANSFORMERS_OFFLINE: '1'
+  HF_HUB_OFFLINE: '1'
+  FLASHINFER_DISABLE_VERSION_CHECK: '1'
+  VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
+  TORCH_MATMUL_PRECISION: high
+  NVIDIA_FORWARD_COMPAT: '1'
+
+command: |
+  vllm serve LiquidAI/LFM2.5-8B-A1B \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --dtype bfloat16 \
+    --load-format instanttensor \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser pythonic \
+    --optimization-level 3 \
+    --performance-mode throughput \
+    --override-generation-config '{"temperature":0.2,"top_k":80,"repetition_penalty":1.05}'
