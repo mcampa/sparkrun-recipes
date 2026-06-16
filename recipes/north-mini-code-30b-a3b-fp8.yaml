@@ -18,7 +18,6 @@ container: sparkrun-eugr-vllm-tf5
 
 mods:
   - "@mcampa/install-cohere-melody"
-  - "@mcampa/fix-cohere2-moe-loader"
 
 solo_only: false
 cluster_only: false
