@@ -16,6 +16,9 @@ description: CohereLabs/North-Mini-Code-1.0-fp8 agentic coding MoE (30B/3B activ
 
 container: sparkrun-eugr-vllm-tf5
 
+mods:
+  - "@mcampa/install-cohere-melody"
+
 solo_only: false
 cluster_only: false
 
