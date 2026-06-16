@@ -1,0 +1,63 @@
+# Recipe: CohereLabs/North-Mini-Code-1.0-fp8
+# Cohere Labs' developer-focused MoE: 30B total / 3B active (128 experts,
+# 8/token), Cohere2MoeForCausalLM custom architecture. Native FP8
+# (compressed-tensors, per-channel weights + per-token dynamic activations),
+# 500k max positions with no RoPE scaling. Trained for agentic SWE harnesses
+# (SWE-Agent, mini-SWE-Agent, OpenCode, Terminus 2) — uses the
+# cohere_command4 tool-call + reasoning parser. Requires vLLM main as of
+# 2026-06; the eugr-tf5 nightly tracks main closely.
+
+recipe_version: '1'
+
+name: north-mini-code-30b-a3b-fp8
+model: CohereLabs/North-Mini-Code-1.0-fp8
+
+description: CohereLabs/North-Mini-Code-1.0-fp8 agentic coding MoE (30B/3B active) — native FP8, 320k context, cohere_command4 tool+reasoning parser
+
+container: sparkrun-eugr-vllm-tf5
+
+solo_only: false
+cluster_only: false
+
+defaults:
+  host: 0.0.0.0
+  port: 8000
+  max_model_len: 320000
+  max_num_batched_tokens: 32768
+  max_num_seqs: 4
+  gpu_memory_utilization: 0.85
+  served_model_name: north-mini-code
+
+env:
+  TRANSFORMERS_OFFLINE: '1'
+  HF_HUB_OFFLINE: '1'
+  FLASHINFER_DISABLE_VERSION_CHECK: '1'
+  VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
+  VLLM_MARLIN_USE_ATOMIC_ADD: '1'
+  TORCH_MATMUL_PRECISION: high
+  NVIDIA_FORWARD_COMPAT: '1'
+
+command: |
+  vllm serve CohereLabs/North-Mini-Code-1.0-fp8 \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --tensor-parallel-size 1 \
+    --dtype auto \
+    --kv-cache-dtype fp8 \
+    --moe-backend triton \
+    --load-format instanttensor \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser cohere_command4 \
+    --reasoning-parser cohere_command4 \
+    --optimization-level 3 \
+    --performance-mode throughput \
+    --override-generation-config '{"temperature":1.0,"top_p":0.95,"top_k":-1}'
