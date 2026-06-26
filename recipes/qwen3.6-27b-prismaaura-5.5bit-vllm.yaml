@@ -1,0 +1,59 @@
+# Qwen3.6-27B — PrismaAURA (5.5-bit mixed NVFP4 + FP8 + BF16)
+# PrismaQuant AURA-allocated export of Qwen/Qwen3.6-27B for vLLM
+# compressed-tensors serving on NVIDIA Blackwell. Per-Linear precision is
+# allocated by the AURA allocator (NVFP4 / FP8 / BF16 passthrough) averaging
+# ~5.5 bits/param.
+
+recipe_version: "1"
+name: Qwen3.6-27B-PrismaAURA-5.5bit-vllm
+description: vLLM serving rdtand/Qwen3.6-27B-PrismaAURA-5.5bit-vllm
+
+# HuggingFace model to download (optional, for --download-model)
+model: rdtand/Qwen3.6-27B-PrismaAURA-5.5bit-vllm
+
+solo_only: true
+
+# Container image to use
+container: vllm-node-tf5
+
+build_args:
+  - --tf5
+
+mods:
+  - "@mcampa/fix-qwen3.6-enhanced-chat-template"
+
+# Default settings (can be overridden via CLI)
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  max_model_len: 196608
+  gpu_memory_utilization: 0.75
+  max_num_batched_tokens: 32768
+  max-num-seqs: 16
+  served_model_name: qwen/qwen3.6-27b
+  speculative_config: '{"method": "mtp", "num_speculative_tokens": 3}'
+
+# Environment variables
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: 1
+
+# The vLLM serve command template
+command: |
+  vllm serve rdtand/Qwen3.6-27B-PrismaAURA-5.5bit-vllm \
+  --served-model-name {served_model_name} \
+  --max-model-len {max_model_len} \
+  --gpu-memory-utilization {gpu_memory_utilization} \
+  --max-num-batched-tokens {max_num_batched_tokens} \
+  --max-num-seqs {max-num-seqs} \
+  --port {port} \
+  --host {host} \
+  --quantization compressed-tensors \
+  --kv-cache-dtype fp8 \
+  --enable-prefix-caching \
+  --enable-chunked-prefill \
+  --speculative-config '{speculative_config}' \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --chat-template qwen3.6-enhanced.jinja \
+  --reasoning-parser qwen3 \
+  --trust-remote-code
