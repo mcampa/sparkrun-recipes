@@ -6,11 +6,26 @@
 # over 48 total, 262k native context. Interleaved thinking between tool calls;
 # uses the poolside_v1 tool-call + reasoning parser.
 #
-# NOTE: LagunaForCausalLM is a brand-new arch (2026). It needs a vLLM build with
-# Laguna + poolside_v1 parser support; the eugr tf5 nightly tracks main closely
-# but verify the image is current (see [[sparkrun-container-image]]). A DFlash
-# draft model (poolside/Laguna-S-2.1-DFlash-NVFP4) exists for speculative
-# decoding — omitted here to keep the base recipe simple and low-memory.
+# NOTE: LagunaForCausalLM is a brand-new arch (2026). poolside_v1 parser support
+# officially lands in vLLM 0.25.0+, but the eugr image on vLLM 0.23.1rc1.dev1302+
+# is confirmed working on Spark (NVIDIA devforum t/377663). Verify the eugr tf5
+# image is current (see [[sparkrun-container-image]]).
+#
+# Serving notes distilled from that devforum thread + poolside model card:
+#   - NVFP4 fits a single 128GB Spark at TP1; FP8/BF16 need a cluster.
+#   - Keep temperature > 0 (0.7 default) — temp=0 wrecks spec-decode acceptance.
+#   - max-num-seqs must stay <= 32 (DFlash draft crashes above that).
+#   - Model tends to overthink / reason in circles: pair with a system prompt
+#     that biases toward action + tool calls. If a response truncates
+#     (finish_reason==length, no tool call), retry with thinking disabled.
+#
+# DFlash speculative decoding is left OFF by default: it needs a *second* model
+# download (poolside/Laguna-S-2.1-DFlash-NVFP4) which conflicts with the offline
+# env below, and acceptance is finicky (num_speculative_tokens:15 → ~8%; use 7
+# → ~22-35%). Net decode gain on Spark is marginal (~20-32 tok/s vs ~22 baseline).
+# To enable: drop HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE (so the draft can download)
+# and add to the command:
+#     --speculative-config '{"model":"poolside/Laguna-S-2.1-DFlash-NVFP4","num_speculative_tokens":7}' \
 
 recipe_version: '1'
 
@@ -28,8 +43,8 @@ defaults:
   host: 0.0.0.0
   port: 8000
   max_model_len: 262144
-  max_num_batched_tokens: 32768
-  max_num_seqs: 2
+  max_num_batched_tokens: 16384
+  max_num_seqs: 16
   gpu_memory_utilization: 0.85
   served_model_name: laguna
   tokenizer_mode: auto
@@ -38,6 +53,7 @@ env:
   TRANSFORMERS_OFFLINE: '1'
   HF_HUB_OFFLINE: '1'
   FLASHINFER_DISABLE_VERSION_CHECK: '1'
+  VLLM_USE_FLASHINFER_SAMPLER: '1'
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: '1'
   VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
   VLLM_MARLIN_USE_ATOMIC_ADD: '1'
