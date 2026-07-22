@@ -1,0 +1,75 @@
+# Recipe: poolside/Laguna-S-2.1-NVFP4
+# Poolside's Laguna-S-2.1 agentic coding MoE: 118B total / ~8B active (256
+# routed experts, top-10 + 1 shared), LagunaForCausalLM custom architecture.
+# NVFP4 weights (compressed-tensors, ~59GB) + FP8 KV cache fit a single GX10 /
+# DGX Spark at TP1. Mixed attention: 12 global + 36 sliding-window (512) layers
+# over 48 total, 262k native context. Interleaved thinking between tool calls;
+# uses the poolside_v1 tool-call + reasoning parser.
+#
+# NOTE: LagunaForCausalLM is a brand-new arch (2026). It needs a vLLM build with
+# Laguna + poolside_v1 parser support; the eugr tf5 nightly tracks main closely
+# but verify the image is current (see [[sparkrun-container-image]]). A DFlash
+# draft model (poolside/Laguna-S-2.1-DFlash-NVFP4) exists for speculative
+# decoding — omitted here to keep the base recipe simple and low-memory.
+
+recipe_version: '1'
+
+name: laguna-s-2.1-nvfp4
+model: poolside/Laguna-S-2.1-NVFP4
+
+description: poolside/Laguna-S-2.1-NVFP4 agentic coding MoE (118B/8B active) — NVFP4 weights, FP8 KV cache, 262k context, poolside_v1 tool+reasoning parser, single-Spark TP1
+
+container: sparkrun-eugr-vllm-tf5
+
+solo_only: false
+cluster_only: false
+
+defaults:
+  host: 0.0.0.0
+  port: 8000
+  max_model_len: 262144
+  max_num_batched_tokens: 32768
+  max_num_seqs: 2
+  gpu_memory_utilization: 0.85
+  served_model_name: laguna
+  tokenizer_mode: auto
+
+env:
+  TRANSFORMERS_OFFLINE: '1'
+  HF_HUB_OFFLINE: '1'
+  FLASHINFER_DISABLE_VERSION_CHECK: '1'
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: '1'
+  VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
+  VLLM_MARLIN_USE_ATOMIC_ADD: '1'
+  TORCH_MATMUL_PRECISION: high
+  NVIDIA_FORWARD_COMPAT: '1'
+  NVIDIA_DISABLE_REQUIRE: '1'
+  CUTE_DSL_ARCH: sm_121a
+
+command: |
+  vllm serve poolside/Laguna-S-2.1-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --tensor-parallel-size 1 \
+    --dtype auto \
+    --tokenizer-mode {tokenizer_mode} \
+    --moe-backend auto \
+    --load-format instanttensor \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --quantization compressed-tensors \
+    --kv-cache-dtype fp8 \
+    --enable-auto-tool-choice \
+    --tool-call-parser poolside_v1 \
+    --reasoning-parser poolside_v1 \
+    --optimization-level 3 \
+    --performance-mode throughput \
+    --default-chat-template-kwargs '{"enable_thinking": true}' \
+    --override-generation-config '{"temperature":0.7,"top_p":0.95}'
