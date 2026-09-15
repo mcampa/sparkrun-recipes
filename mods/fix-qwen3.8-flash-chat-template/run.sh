@@ -1,8 +1,12 @@
 #!/bin/bash
 set -e
-DEST="${WORKSPACE_DIR:-/workspace/vllm}/chat_template.jinja"
-cp chat_template.jinja "$DEST"
-# Also write to /workspace/chat_template.jinja in case the serve command runs
-# from a different cwd than the mod's WORKSPACE_DIR.
+# sparkrun sets WORKSPACE_DIR to the container cwd (often /workspace), while the
+# recipe --chat-template path is /workspace/vllm/chat_template.jinja. Write both.
+mkdir -p /workspace/vllm
+cp chat_template.jinja /workspace/vllm/chat_template.jinja
 cp chat_template.jinja /workspace/chat_template.jinja
-echo "=======> chat_template.jinja installed at $DEST and /workspace/chat_template.jinja"
+if [ -n "${WORKSPACE_DIR:-}" ]; then
+  mkdir -p "$WORKSPACE_DIR"
+  cp chat_template.jinja "$WORKSPACE_DIR/chat_template.jinja"
+fi
+echo "=======> chat_template.jinja installed at /workspace/vllm/chat_template.jinja and /workspace/chat_template.jinja"
