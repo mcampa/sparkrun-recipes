@@ -1,0 +1,209 @@
+# Recipe: nvidia/Qwen3.8-Flash-Next-NVFP4 on a single DGX Spark / GB10
+#
+# A 125B-A6B hybrid MoE (36 GDN linear-attention + 12 full-attention layers, plus a
+# 51B n-gram "PLE" table and a 4B MTP head). The point of this recipe is the PLE
+# table: it is ~48 GiB of the ~124 GiB checkpoint, and *every* token reads a handful
+# of its rows. Two ways to pay for it:
+#
+#   RESIDENT  load it into the unified pool  -> ~48 GiB gone, maybe 2 seqs of context
+#   NVMe mmap keep it on disk, preadv the    -> ~77 GiB resident weights, 633k-token
+#             ~16 rows a token needs            KV pool at gmu 0.80
+#
+# This recipe does the second (VLLM_PLE_MMAP=1), which is what makes the model fit a
+# single Spark with real context left over. The gather is a CPU op + H2D copy, so it
+# is listed in --splitting-ops to stay outside the CUDA graphs.
+#
+# WHY THIS STACK AND NOT tonyd2wild/molo-molo
+# -------------------------------------------
+# tonyd2wild's lane (and molo-molo's sparkrun port of it) is the faster single-stream
+# number -- 43.9 tok/s vs ~31 here -- but it runs with prefix caching INERT. On this
+# hybrid arch, MTP makes vLLM unable to identify a draft KV group, so it treats the
+# Mamba groups as draft groups and disables prefix-cache reuse across requests. For a
+# coding agent that is the wrong trade: every turn re-prefills the whole conversation.
+#
+# The blazux/qwen3.8-Flash-DGX stack used here fixes prefix caching at the root. vLLM
+# overwrites cache_config.block_size with the *smallest* KV-group block (8 tokens with
+# MTP=2) while the Mamba block is 1600, and two consumers then used 8 as if it were
+# 1600 -- so a prefix hit restored an all-zero Mamba state (silently wrong answers, not
+# a crash). src/patch_mamba_block_size.py is a two-line fix. Measured on the same box:
+#
+#   TTFT, 2nd+ turn, 8 concurrent 20k-token conversations:  5.9s -> 4.1s
+#   KV cache @0.80:                                          582k -> 633k tokens
+#   agentic tournament (17 scenarios x 3):                   45/51 -> 45/51 (tie)
+#   decode:                                                  25.7 -> 30.8 tok/s
+#
+# Same quality, +20% decode, better concurrent TTFT, more KV.
+#
+# WHAT THIS RECIPE ACTUALLY RUNS BY DEFAULT: the NVIDIA checkpoint exactly as
+# published. VLLM_FP8_HYBRID=1 is set below, but the flag is **inert** against a
+# stock snapshot -- the shim only rewrites modules whose safetensors carry an
+# F8_E4M3 weight with a weight_scale_inv sibling, and the stock checkpoint has none.
+# So out of the box you get ~26 tok/s, zero added quantization, and the same 45/51
+# agentic score as hybrid.
+#
+# Hybrid (~31 tok/s, +9% KV, ~77 GiB resident instead of ~84) needs a one-time
+# rewrite of the ~15 GiB of dense side layers both NVFP4 checkpoints leave in bf16
+# (GDN in_proj/out_proj, QSA q/k/v/o, shared experts -- read on every decoded token)
+# into blockwise fp8-e4m3. That is scripts/prepare-hybrid.sh in the upstream repo:
+#
+#   cd ~/qwen38-work/qwen3.8-Flash-DGX && scripts/prepare-hybrid.sh
+#
+# It writes a sibling "-fp8hybrid" snapshot of relative symlinks, so only the 4
+# rewritten shards are real (+~13 GiB) and the original is untouched. Then point
+# `model:` at that directory -- sparkrun takes an absolute path here:
+#
+#   model: /home/mcampa/.cache/huggingface/hub/models--nvidia--Qwen3.8-Flash-Next-NVFP4/snapshots/<ref>-fp8hybrid
+#
+# Leave VLLM_FP8_HYBRID=1 either way: it is a no-op until those fp8 weights exist,
+# and off would silently ignore them afterwards. See README "enabling hybrid mode".
+#
+# The PLE table itself is never requantized -- it is stored fp8 in the checkpoint and
+# served from NVMe as-is.
+#
+# Container: the blazux/qwen3.8-Flash-DGX image (11 patches over the official
+# vllm/vllm-openai:qwen38-flash-next base, pinned by digest). Its base declares
+# ENTRYPOINT ["vllm","serve"], which would swallow the command sparkrun appends --
+# hence executor_config.entrypoint below. Roughly 10-13 min to load the weights on
+# first boot.
+#
+# Memory budget at gmu 0.80 (~97 GiB of 121 GiB usable):
+#   NVFP4 experts + fp8 side layers, resident .... ~77 GiB
+#   PLE n-gram table ............................. 0  (48 GiB, stays on NVMe)
+#   KV cache, fp8_e4m3 ........................... ~633k tokens (~26-38 GiB)
+#   remaining ..................................... cudagraphs, activations
+# 633k tokens means 2.4x a full 262k request, or ~10 realistic 60k-token agent
+# sessions. Budgets are tight enough that blazux measured gmu 0.85 drifting into swap
+# after a day and 0.875 being OOM-killed on a 300k prefill -- do not raise it.
+#
+# `sparkrun recipe vram` reports KV as if all 48 layers carried KV; only the 12
+# full-attention layers do, so treat its number (and any "exceeds budget" warning) as
+# a false alarm here. vLLM reads layer_types from config.json and prints the
+# authoritative `GPU KV cache size: N tokens` at startup -- check that instead.
+
+recipe_version: '1'
+
+name: qwen3.8-flash-next-nvfp4
+model: nvidia/Qwen3.8-Flash-Next-NVFP4
+runtime: vllm
+
+mods:
+  - "@mcampa/fix-qwen3.8-flash-chat-template"
+
+description: nvidia/Qwen3.8-Flash-Next-NVFP4 (125B-A6B hybrid MoE) on one DGX Spark — PLE n-gram table mmapped from NVMe, fp8 side layers, 262k context, working prefix caching, MTP speculation
+
+container: qwen38-flash-dgx:nvfp4
+
+solo_only: true
+cluster_only: false
+
+# The base image's ENTRYPOINT is ["vllm","serve"]; sparkrun launches `bash -c <serve>`,
+# which that entrypoint would misparse. Clearing it is the supported fix.
+executor_config:
+  entrypoint: ""
+
+defaults:
+  host: 0.0.0.0
+  port: 8000
+  tensor_parallel: 1
+  # 0.80 is deliberate: 0.85 drifted into swap after a day, 0.875 OOM-killed a 300k
+  # prefill. See the memory budget note above.
+  gpu_memory_utilization: 0.80
+  max_model_len: 262144
+  # Low values flatline aggregate throughput without looking saturated.
+  max_num_seqs: 8
+  # Prefill chunk. With prefix caching on, chunks are clipped to the 1,600-token
+  # Mamba block anyway, so this is an upper bound rather than a fixed size.
+  max_num_batched_tokens: 8192
+  served_model_name: qwen3.8-flash-next
+  # auto = bf16 KV. fp8_e4m3 gives ~1.9x KV (~1M context on this box) at a measured
+  # speed and quality cost; see README "more context".
+  kv_cache_dtype: auto
+  tool_call_parser: qwen3_coder
+  reasoning_parser: qwen3
+  chat_template: /workspace/vllm/chat_template.jinja
+  # Speculative depth from the model's own MTP head — no second checkpoint to download.
+  # 2 is blazux's agentic-tournament winner; 3 is +7% decode for about one tournament
+  # point. Hardcoded (not templated) because sparkrun resolves placeholders fine at the
+  # top level of a value but not reliably once nested inside a JSON literal.
+  # PLE/PLE-gather, Mamba mixer and QSA kernels must stay OUT of the CUDA graphs:
+  # the PLE gather is a CPU op + host-to-device copy. This is the list that matches the
+  # qwen3_8_flash_next_* op names on the "preview" base image (the v0.29 release image
+  # renames them to qwen4_exp_* and the op to ple_mmap_lookup_ids).
+  splitting_ops: '["vllm::unified_attention_with_output","vllm::unified_mla_attention_with_output","vllm::mamba_mixer2","vllm::mamba_mixer","vllm::short_conv","vllm::qwen3_8_flash_next_ple_short_conv","vllm::qwen3_8_flash_next_qsa_with_output","vllm::linear_attention","vllm::qwen_gdn_attention_core","vllm::qwen_gdn_attention_core_fused_norm_packed","vllm::sparse_attn_indexer","vllm::ple_mmap_lookup"]'
+
+env:
+  # --- PLE n-gram table on NVMe (the reason this fits) ---------------------------
+  VLLM_PLE_MMAP: '1'
+  VLLM_PLE_MMAP_WORKERS: '32'
+  # 0 = do not stream all 48 GiB at boot. The hot n-grams end up in page cache anyway;
+  # set to 1 only on a box with spare RAM and a fast cold-start requirement.
+  VLLM_PLE_MMAP_PREWARM: '0'
+  # random = no readahead, which keeps the page cache cleaner for a table touched
+  # sparsely. 'normal' is the alternative.
+  VLLM_PLE_MMAP_MADVISE: random
+  # VLLM_PLE_MMAP_DIR is deliberately unset: the NVIDIA checkpoint ships ple-table/
+  # inside the snapshot, and the patched loader falls back to the model path. Set it
+  # only if you keep the table outside the model directory.
+
+  # --- hybrid mode: NVFP4 experts + blockwise-fp8 side layers ---------------------
+  VLLM_FP8_HYBRID: '1'
+  VLLM_USE_DEEP_GEMM: '0'
+
+  # --- deterministic QSA top-k ----------------------------------------------------
+  # The stock persistent_topk kernel is non-deterministic on GB10 and can drop real
+  # top-k candidates. This uses @jschmied's deterministic kernel, which recovers the
+  # prefill penalty the exact torch.topk fallback pays (see VLLM_QSA_EXACT_TOPK, which
+  # would win over this if set to 1).
+  VLLM_QSA_DET_TOPK: '1'
+  VLLM_QSA_DET_LIB: /opt/llm/kernel-det/_C_det.so
+  VLLM_QSA_EXACT_TOPK: '0'
+  # M%4 padding for the blockwise-fp8 GEMM. No-op with prefix caching on (chunks are
+  # already clipped to the 1,600-token block, so M%4==0); set to 1 only if you turn
+  # prefix caching off while staying in hybrid mode.
+  VLLM_FP8_PAD_M4: '0'
+
+  # --- reduced MTP draft vocabulary -----------------------------------------------
+  # The MTP drafter shares the target's lm_head, so each drafted token scores all
+  # 248,320 rows (a 1.27 GiB bf16 read on a bandwidth-bound step). This gives it a
+  # private 65,536-row slice (+320 MiB) and masks the rest. The target still verifies
+  # every token, so outputs are unchanged; only acceptance can move (75% -> 68% on
+  # blazux's measurement, for 33.1 -> 36.6-38.5 tok/s).
+  VLLM_MTP_DRAFT_VOCAB: /opt/llm/draft_vocab_65536.npy
+
+  VLLM_USE_FLASHINFER_SAMPLER: '1'
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: '1'
+  VLLM_HTTP_TIMEOUT_KEEP_ALIVE: '600'
+  CUTE_DSL_ARCH: sm_121a
+
+command: |
+  vllm serve {model} \
+    --served-model-name {served_model_name} \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --load-format safetensors \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    -cc.cudagraph_mode=PIECEWISE \
+    -cc.splitting_ops='{splitting_ops}' \
+    --no-enable-flashinfer-autotune \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --enable-auto-tool-choice \
+    --tool-call-parser {tool_call_parser} \
+    --reasoning-parser {reasoning_parser} \
+    --chat-template {chat_template} \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":2}'
+
+metadata:
+  model_params: 125B
+  activated_params: 6B
+  model_dtype: nvfp4
+  kv_dtype: bf16
+  architecture: Qwen3_8FlashNext (hybrid GDN + full attention)
+  ple_table: 51B params, ~48 GiB fp8, mmapped from NVMe
+  max_position_embeddings: 262144
+  upstream_stack: https://github.com/blazux/qwen3.8-Flash-DGX
